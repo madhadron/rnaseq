@@ -63,3 +63,16 @@ class Bag(object):
     def itercounts(self):
         # yield element-count pairs
         return self._data.iteritems()
+
+def group_by_first(s):
+    prev = None
+    for (x,y) in s:
+        if x != prev:
+            if prev != None:
+                yield accum
+            accum = [y]
+            prev = x
+        else:
+            accum.append(y)
+    if prev != None:
+        yield accum

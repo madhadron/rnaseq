@@ -1,17 +1,51 @@
 import numpy as np
 cimport numpy as np
 from pymc import *
+import sqlite3
+from bag import *
 
-cpdef double alpha(double logp):
+def get_sample(db, sample_id, transcripts):
+    """Fetch leftsites and multiplicities for 'transcripts' in 'sample_id'.
+
+    'db' should be an SQLite3 database handle containing the sample
+    groups.  'sample_id' is an integer telling which sample to fetch.
+    Only those transcripts in 'transcripts' (a list of integers) will
+    be returned.
+
+    Returns a dictionary with the transcript IDs as keys, and a tuple
+    of the leftsites as a numpy array and a Bag (see bag.py) of
+    multiplicities as tuples of transcript IDs.
+    """
+    r = {}
+    for t in transcripts:
+        c = db.execute("""select n from leftsites where sample=? 
+                          and transcript=? order by position asc""",
+                       (sample_id, t))
+        leftsites = np.array([x for (x,) in c])
+        if len(leftsites) == 0:
+            raise ValueError("No transcript with ID %d for sample %d in database" % (t,sample_id))
+        multiplicities = Bag()
+        c = db.execute("""select a.multiplicity, a.transcript 
+                          from multiplicity_entries as a
+                          join multiplicity_entries as b
+                          on b.transcript = ? and 
+                          a.multiplicity = b.multiplicity""",
+                       (t,))
+        for m in group_by_first(c):
+            multiplicities.update(m)
+        r[t] = (leftsites,multiplicities)
+    return r
+
+def alpha(float logp):
     """Calculates first parameter of Beta distribution.
-    
+
     'logp' should be a double.
     """
     cdef double eta
     eta = np.exp(4.9 - 0.7*logp) - 1
     return np.exp(logp)*eta
 
-cpdef double beta(double logp):
+def beta(float logp):
     """Calculates the second parameter of the Beta distribution.
     
     'log' can be a floating point number or a numpy array.
@@ -20,7 +54,7 @@ cpdef double beta(double logp):
     eta = np.exp(4.9 - 0.7*logp) - 1
     return (1 - np.exp(logp))*eta
 
-cpdef double maintain_positive_parameters(double minusmu=None, double a=None):
+def maintain_positive_parameters(minusmu=None, a=None):
     """Guard against feeding negative parameters to Beta distribution.
 
     Unconstrainted, 'minusmu' is Gamma distributed and 'a' is Cauchy
@@ -39,8 +73,6 @@ cpdef double maintain_positive_parameters(double minusmu=None, double a=None):
 
 def build_model(db, group1, group2):
     n_transcripts = db.execute("""select count(id) from transcripts""").fetchone()[0]
-
-
     [a,minusmu,maintain_beta,r] = [{},{},{},{}]
     for t in transcripts:
         # t gets reassigned at each iteration, not redefined, so it
@@ -60,21 +92,22 @@ def build_model(db, group1, group2):
                                      verbose = 0,
                                      cache_depth = 2,
                                      trace = False)
-
+        
         # All group 1 samples use a covariate of 0.5, all group 2
         # samples a covariate of -0.5.
         for sample in group1:
             s = sample
             r[(t,1,s)] = Beta('r'+str(t)+'-group1-'+s,
-                            alpha=alpha(-1*minusmu[tr] + 0.5*a[tr]),
-                            beta=beta(-1*minusmu[tr] + 0.5*a[tr]),
-                            trace = False)
-
+                              alpha=alpha(-1*minusmu[tr] + 0.5*a[tr]),
+                              beta=beta(-1*minusmu[tr] + 0.5*a[tr]),
+                              trace = False)
         for sample in group2:
-            r[(t,2,s) = Beta('r'+str(t)+'-group2-'+s,
+            s = sample
+            r[(t,2,s)] = Beta('r'+str(t)+'-group2-'+s,
                              alpha=alpha(-1*minusmu[tr] - 0.5*a[tr]),
                              beta=beta(-1*minusmu[tr] - 0.5*a[tr]),
                              trace = False)
+    return MCMC([minusmu, a, maintain_beta, r])
 
             # poisson_mean[(t,c)] = Deterministic(eval=make_poisson_mean(i),
             #                                     name='poisson_mean'+str(t)+str(c),
@@ -91,4 +124,3 @@ def build_model(db, group1, group2):
     #       for i in range(N)]
 
 
-    return MCMC([minusmu, a, maintain_beta, r])
