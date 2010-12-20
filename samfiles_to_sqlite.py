@@ -30,10 +30,16 @@ def initialize_database(db):
 
     """
     db.execute("""
+               create table sample_group (
+                   id integer primary key,
+                   label text unique,
+                   is_control boolean
+               )""")
+    db.execute("""
                create table samples (
                    id integer primary key,
+                   sample_group integer references sample_group(id),
                    filename text,
-                   covariate real,
                    n_reads integer
                )""")
     db.execute("""
@@ -70,10 +76,16 @@ def initialize_database(db):
     db.commit()
     vmsg("Initialized database.")
 
+def insert_sample_group(db, label, is_control):
+    db.execute("""insert into sample_group (label,is_control)
+                  values (?,?)""", (label, is_control))
+    (sample_group,) = db.execute("""select last_insert_rowid()""").fetchone()
+    vmsg("Assigned sample group id %d to group with label %s" % (sample_group, label))
+    return sample_group
 
-def insert_sample(db, filename, covariate):
-    db.execute("""insert into samples (filename,covariate)
-                  values (?,?)""", (filename, covariate))
+def insert_sample(db, filename, sample_group):
+    db.execute("""insert into samples (filename,sample_group)
+                  values (?,?)""", (filename, sample_group))
     (sample,) = db.execute("""select last_insert_rowid()""").fetchone()
     vmsg("Assigned sample id %d" % sample)
     return sample
@@ -141,11 +153,11 @@ def insert_reads_and_multiplicities(db, sample, samfile):
     return n_reads
 
 
-def load_sam(db, filename, covariate):
-    vmsg("Loading reads from %s with covariate %f" % (filename,covariate))
+def load_sam(db, filename, sample_group):
+    vmsg("Loading reads from %s with covariate %f" % (filename,sample_group))
     s = pysam.Samfile(filename)
 
-    sample = insert_sample(db, filename, covariate)
+    sample = insert_sample(db, filename, sample_group)
     insert_or_check_transcripts(db, sample, s.header['SQ'])
     n_reads = insert_reads_and_multiplicities(db, sample, s)
     db.execute("""update samples set n_reads=? where id=?""",
@@ -231,10 +243,12 @@ def main(argv=None):
 
         db = sqlite3.connect(db_filename)
         initialize_database(db)
+        control_sample_group = insert_sample_group(db, "Controls", True)
         for f in condition1_files:
-            load_sam(db, f, 0.5)
+            load_sam(db, f, control_sample_group)
+        other_sample_group = insert_sample_group(db, "Others", False)
         for f in condition2_files:
-            load_sam(db, f, -0.5)
+            load_sam(db, f, other_sample_group)
 
 
     
