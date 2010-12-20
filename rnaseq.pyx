@@ -2,44 +2,55 @@ import numpy as np
 cimport numpy as np
 from pymc import *
 
-def build_model(db, transcripts):
-    """Leftsite arrays is now a list of lists of arrays."""
-    covariates = [x for (x,) in db.execute("""select distinct covariate 
-                                              from samples""")]
+cpdef double alpha(double logp):
+    """Calculates first parameter of Beta distribution.
+    
+    'logp' should be a double.
+    """
+    cdef double eta
+    eta = np.exp(4.9 - 0.7*logp) - 1
+    return np.exp(logp)*eta
+
+cpdef double beta(double logp):
+    """Calculates the second parameter of the Beta distribution.
+    
+    'log' can be a floating point number or a numpy array.
+    """
+    cdef double eta
+    eta = np.exp(4.9 - 0.7*logp) - 1
+    return (1 - np.exp(logp))*eta
+
+cpdef double maintain_positive_parameters(double minusmu=None, double a=None):
+    """Guard against feeding negative parameters to Beta distribution.
+
+    Unconstrainted, 'minusmu' is Gamma distributed and 'a' is Cauchy
+    distributed, so their combination can produce negative values as
+    the parameters of the Beta distribution that gives the values of r
+    below.  This function is used in a potential to prevent such
+    cases.
+    """
+    if alpha(-1*minusmu + 0.5*a) <= 0 or \
+            alpha(-1*minusmu - 0.5*a) <= 0 or \
+            beta(-1*minusmu + 0.5*a) <= 0 or \
+            beta(-1*minusmu - 0.5*a) <= 0:
+        return -inf
+    else:
+        return 0
+
+def build_model(db, group1, group2):
     n_transcripts = db.execute("""select count(id) from transcripts""").fetchone()[0]
 
-    def maintain_positive_parameters(minusmu=None, a=None):
-        def logp(c):
-            return -1*minusmu + a*c
-        def eta(c):
-            return np.exp(4.9 - 0.7*logp(c)) - 1
-        def p(c):
-            return np.exp(logp(c))
-        if any([p(c) <= 0 for c in covariates]) or \
-                any([1-p(c) <= 0 for c in covariates]):
-            return -inf
-        else:
-            return 0
 
-    def make_logp(c):
-        def _logp(minusmu=None, a=None):
-            return -1*minusmu + a*c
-        return _logp
-
-    def make_eta(c):
-        def _eta(logp=None):
-            return np.exp(4.9 - 0.7*logp) - 1
-        return _eta
-
-    def make_p(c):
-        def _p(logp=None):
-            return np.exp(logp)
-        return _p
-
-    [a,minusmu,maintain_beta,logp,eta,p,r,poisson_mean] = [{},{},{},{},{},{},{},{}]
+    [a,minusmu,maintain_beta,r] = [{},{},{},{}]
     for t in transcripts:
-        minusmu[t] = Gamma('minusmu'+str(t), alpha=11, beta=43.5/np.sqrt(n_transcripts))
-        a[t] = Cauchy('a'+str(t), 0, 29)
+        # t gets reassigned at each iteration, not redefined, so it
+        # will be dynamically scoped if we use it as a free variable
+        # in defining the model.  We assign tr the value of t, so it
+        # will be properly lexically scoped, and use that instead.
+        tr = t
+        minusmu[t] = Gamma('minusmu'+str(t), alpha=11, beta=43.5/np.sqrt(n_transcripts),
+                           trace=True)
+        a[t] = Cauchy('a'+str(t), 0, 29, trace=True)
         a[t].value = 0
         maintain_beta[t] = Potential(logp = maintain_positive_parameters,
                                      name = 'maintain_beta' + str(t),
@@ -47,47 +58,23 @@ def build_model(db, transcripts):
                                                 'a': a[t]},
                                      doc = 'Maintain beta parameters positive',
                                      verbose = 0,
-                                     cache_depth = 2)
+                                     cache_depth = 2,
+                                     trace = False)
 
-        for c in covariates:
-            # c gets reassigned at each iteration, not redefined, so
-            # it will by dynamically scoped if used as a free variable
-            # in lambda.  By assigning cv, we get a lexically scoped
-            # free variable.
-            cv = c 
-            logp[(t,c)] = Deterministic(eval=make_logp(cv),
-                                        name='logp'+str(t)+str(cv),
-                                        parents={'minusmu': minusmu[t],
-                                                 'a': a[t]},
-                                        doc='log of p',
-                                        trace=True,
-                                        verbose=0,
-                                        dtype=float,
-                                        plot=False,
-                                        cache_depth=2)
-            eta[(t,c)] = Deterministic(eval=make_eta(cv),
-                                       name='eta'+str(t)+str(cv),
-                                       parents={'logp': logp[(t,cv)]},
-                                       doc='eta',
-                                       trace=True,
-                                       verbose=0,
-                                       dtype=float,
-                                       plot=False,
-                                       cache_depth=2)
-            p[(t,c)] = Deterministic(eval=make_p(cv),
-                                     name='p'+str(t)+str(cv),
-                                     parents={'logp': logp[(t,cv)]},
-                                     doc='p',
-                                     trace=True,
-                                     verbose=0,
-                                     dtype=float,
-                                     plot=False,
-                                     cache_depth=2)
-            r[(t,c)] = Beta('r'+str(t)+str(cv),
-                            alpha=p[(t,cv)]*eta[(t,cv)],
-                            beta=(1-p[(t,cv)])*eta[(t,cv)])
+        # All group 1 samples use a covariate of 0.5, all group 2
+        # samples a covariate of -0.5.
+        for sample in group1:
+            s = sample
+            r[(t,1,s)] = Beta('r'+str(t)+'-group1-'+s,
+                            alpha=alpha(-1*minusmu[tr] + 0.5*a[tr]),
+                            beta=beta(-1*minusmu[tr] + 0.5*a[tr]),
+                            trace = False)
 
-
+        for sample in group2:
+            r[(t,2,s) = Beta('r'+str(t)+'-group2-'+s,
+                             alpha=alpha(-1*minusmu[tr] - 0.5*a[tr]),
+                             beta=beta(-1*minusmu[tr] - 0.5*a[tr]),
+                             trace = False)
 
             # poisson_mean[(t,c)] = Deterministic(eval=make_poisson_mean(i),
             #                                     name='poisson_mean'+str(t)+str(c),
@@ -104,4 +91,4 @@ def build_model(db, transcripts):
     #       for i in range(N)]
 
 
-    return MCMC([minusmu, a, maintain_beta, logp, eta, p, r])
+    return MCMC([minusmu, a, maintain_beta, r])
