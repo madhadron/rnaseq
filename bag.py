@@ -66,7 +66,9 @@ class Bag(object):
 
 def group_by_first(s):
     prev = None
-    for (x,y) in s:
+    for q in s:
+        x = q[0]
+        y = q[1:]
         if x != prev:
             if prev != None:
                 yield accum

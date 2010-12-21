@@ -40,15 +40,21 @@ def get_sample(db, sample_id, transcripts):
         if len(leftsites) == 0:
             raise ValueError("No transcript with ID %d for sample %d in database" % (t,sample_id))
         multiplicities = Bag()
-        c = db.execute("""select a.multiplicity, a.transcript 
+        c = db.execute("""select a.multiplicity, a.transcript, b.position 
                           from multiplicity_entries as a
                           join multiplicity_entries as b
                           on b.transcript = ? and 
-                          a.multiplicity = b.multiplicity""",
-                       (t,))
+                          a.transcript != ? and
+                          a.multiplicity = b.multiplicity
+                          join multiplicities as c
+                          on a.multiplicity = c.id
+                          where c.sample = ?""",
+                       (t,t,sample_id))
         for m in group_by_first(c):
-            multiplicities.update(tuple(m))
-        r[t] = (leftsites,multiplicities)
+            pos = m[0][1]
+            targets = tuple([x[0] for x in m])
+            multiplicities.update([(pos,targets)])
+        r[t] = {'leftsites': leftsites, 'multiplicities': multiplicities}
     return r
 
 def alpha(float logp):
@@ -82,12 +88,12 @@ def maintain_positive_parameters(minusmu=None, a=None):
             alpha(-1*minusmu - 0.5*a) <= 0 or \
             beta(-1*minusmu + 0.5*a) <= 0 or \
             beta(-1*minusmu - 0.5*a) <= 0:
-        return -inf
+        return -np.inf
     else:
         return 0
 
 
-def multiplicity_correction(int T, int L, int transcript, list rs, multiplicities):
+def multiplicity_correction(int T, int L, int transcript, dict rs, multiplicities):
     cdef np.ndarray[np.double_t, ndim=1] pm
     cdef double thisr, z
     cdef int position, multiplicity
@@ -111,12 +117,16 @@ def make_observation(group_id, sample_id, transcript, rs, T, leftsites, multipli
     L = len(leftsites)
     def _pm(rs = None):
         return multiplicity_correction(T, L, transcript, rs, multiplicities)
+    pm_name = 'poisson_mean'+str(transcript)+'-group'+str(group_id)+'-'+str(sample_id)
     poisson_mean = Deterministic(eval=_pm,
-                                 name='poisson_mean'+str(transcript)+\
-                                     '-group'+str(group_id)+'-'+str(sample_id),
+                                 doc='Corrected mean for Poisson distribution',
+                                 name=pm_name,
                                  parents={'rs': rs},
-                                 trace=False, verbose=0, dtype=loat,
-                                 plot=False, cache_depth=2)
+                                 trace=False, 
+                                 verbose=0, 
+                                 dtype=float,
+                                 plot=False, 
+                                 cache_depth=2)
     observation = Poisson('d'+str(transcript)+'-group'+str(group_id)+\
                               '-'+str(sample_id),
                           mu = poisson_mean,
@@ -124,25 +134,25 @@ def make_observation(group_id, sample_id, transcript, rs, T, leftsites, multipli
     return [poisson_mean, observation]
 
 
-
 def build_model(db, group1, group2, transcripts):
     n_transcripts = db.execute("""select count(id) from transcripts""").fetchone()[0]
     n_reads = {1: samples_of_group(db, group1),
                2: samples_of_group(db, group2)}
+    samples1 = n_reads[1].keys()
+    samples2 = n_reads[2].keys()
     data = {1: dict([(s,get_sample(db, s, transcripts))
                      for s in n_reads[1].keys()]),
             2: dict([(s,get_sample(db, s, transcripts))
                      for s in n_reads[2].keys()])}
-    [a,minusmu,maintain_beta,r,d] = [{},{},{},{},[]]
+    [a,minusmu,maintain_beta,alphas,betas,r,d] = [{},{},{},{},{},{},{}]
     for t in transcripts:
         # t gets reassigned at each iteration, not redefined, so it
         # will be dynamically scoped if we use it as a free variable
         # in defining the model.  We assign tr the value of t, so it
         # will be properly lexically scoped, and use that instead.
         tr = t
-        minusmu[t] = Gamma('minusmu'+str(t), alpha=11, beta=43.5/np.sqrt(n_transcripts),
-                           trace=True)
-        a[t] = Cauchy('a'+str(t), 0, 29, trace=True) ## FIXME: Width depends on n_transcripts?
+        minusmu[t] = Gamma('minusmu'+str(t), alpha=11, beta=43.5/np.sqrt(n_transcripts))
+        a[t] = Cauchy('a'+str(t), 0, 29)
         a[t].value = 0
         maintain_beta[t] = Potential(logp = maintain_positive_parameters,
                                      name = 'maintain_beta' + str(t),
@@ -150,49 +160,108 @@ def build_model(db, group1, group2, transcripts):
                                                 'a': a[t]},
                                      doc = 'Maintain beta parameters positive',
                                      verbose = 0,
-                                     cache_depth = 2,
-                                     trace = False)
+                                     cache_depth = 2)
+
+    def make_alpha(cov):
+        def _f(minusmu=None, a=None):
+            return alpha(-1*minusmu + cov*a)
+        return _f
+
+    def make_beta(cov):
+        def _f(minusmu=None, a=None):
+            return beta(-1*minusmu + cov*a)
+        return _f
+
+
     # All group 1 samples use a covariate of 0.5, all group 2
     # samples a covariate of -0.5.
     r[1] = {}
-    for sample in group1:
+    alphas[1] = {}
+    betas[1] = {}
+    for sample in samples1:
         s = sample
         r[1][s] = {}
+        alphas[1][s] = {}
+        betas[1][s] = {}
         for t in transcripts:
             tr = t
+            alphas[1][s][t] = Deterministic(eval=make_alpha(0.5),
+                                            doc='',
+                                            name='alpha'+str(t)+'-group1-'+str(s),
+                                            parents={'minusmu':minusmu[tr],
+                                                     'a':a[tr]},
+                                            trace=False,
+                                            verbose=0,
+                                            dtype=float,
+                                            plot=False,
+                                            cache_depth=2)
+            betas[1][s][t] = Deterministic(eval=make_beta(0.5),
+                                          doc='',
+                                          name='beta'+str(t)+'-group1-'+str(s),
+                                          parents={'minusmu':minusmu[tr],
+                                                   'a':a[tr]},
+                                          trace=False,
+                                          verbose=0,
+                                          dtype=float,
+                                          plot=False,
+                                          cache_depth=2)
             r[1][s][t] = Beta('r'+str(t)+'-group1-'+str(s),
-                              alpha=alpha(-1*minusmu[tr] + 0.5*a[tr]),
-                              beta=beta(-1*minusmu[tr] + 0.5*a[tr]),
-                              trace = False)
+                              alpha=alphas[1][s][tr],
+                              beta=betas[1][s][tr],
+                              trace = True)
     r[2] = {}
-    for sample in group2:
+    alphas[2] = {}
+    betas[2] = {}
+    for sample in samples2:
         s = sample
         r[2][s] = {}
+        alphas[2][s] = {}
+        betas[2][s] = {}
         for t in transcripts:
             tr = t
+            alphas[2][s][t] = Deterministic(eval=make_alpha(-0.5),
+                                            doc='',
+                                            name='alpha'+str(t)+'-group2-'+str(s),
+                                            parents={'minusmu':minusmu[tr],
+                                                     'a':a[tr]},
+                                            trace=False,
+                                            verbose=0,
+                                            dtype=float,
+                                            plot=False,
+                                            cache_depth=2)
+            betas[2][s][t] = Deterministic(eval=make_beta(-0.5),
+                                          doc='',
+                                          name='beta'+str(t)+'-group2-'+str(s),
+                                          parents={'minusmu':minusmu[tr],
+                                                   'a':a[tr]},
+                                          trace=False,
+                                          verbose=0,
+                                          dtype=float,
+                                          plot=False,
+                                          cache_depth=2)
             r[2][s][t] = Beta('r'+str(t)+'-group2-'+str(s),
-                              alpha=alpha(-1*minusmu[tr] - 0.5*a[tr]),
-                              beta=beta(-1*minusmu[tr] - 0.5*a[tr]),
-                              trace = False)
+                              alpha=alphas[2][s][tr],
+                              beta=betas[2][s][tr],
+                              trace = True)
 
     d[1] = {}
-    for sample in group1:
+    for sample in samples1:
         s = sample
         d[1][s] = []
         for t in transcripts:
-            d[1][s].append(make_observation(1, s, t, r[1][s], n_reads[1][s], 
+            d[1][s].extend(make_observation(1, s, t, r[1][s], n_reads[1][s], 
                                             data[1][s][t]['leftsites'],
                                             data[1][s][t]['multiplicities']))
     d[2] = {}
-    for sample in group2:
+    for sample in samples2:
         s = sample
         d[2][s] = []
         for t in transcripts:
-            d[2][s].append(make_observation(2, s, t, r[2][s], n_reads[2][s], 
+            d[2][s].extend(make_observation(2, s, t, r[2][s], n_reads[2][s], 
                                             data[2][s][t]['leftsites'],
                                             data[2][s][t]['multiplicities']))
             
-    return MCMC([minusmu, a, maintain_beta, r])
+    return MCMC([minusmu, a, maintain_beta, alphas, betas, r, d])
 
 
 
