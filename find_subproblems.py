@@ -6,6 +6,11 @@ Given an SQLite3 database as produced by samfiles_to_sqlite.py, find
 groups of transcripts which can be treated as separate subproblems.
 Each group of transcripts is printed as a space separated list of
 integers referring to transcript IDs in the database.
+
+This script uses a graph which is a union of all comparisons between
+sample groups.  Biologically, this is unlikely to make much difference
+since two transcripts which are connected in one pair of groups are
+likely to be connected in most groups.
 """
 
 import getopt
