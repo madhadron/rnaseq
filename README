@@ -1,16 +1,52 @@
+rnaseq 0.1
+Copyright 2010 Frederick Ross <madhadron at gmail dot com>
+
+rnaseq is a set of tools for doing statistical inference on RNASeq
+data, developed in the Bioinformatics and Biostatistics Core Facility
+of the EPFL.  It handles one way linear models, multiply mapped reads,
+and scales up to large collections of transcripts.
+
+rnaseq is released under the GNU General Public License 3.0.  A copy
+of this license is in the LICENSE file.
+
+Installation
+------------
+
+rnaseq has a number of dependencies.  You must have numpy, pyMC,
+pysam, sqlite3, NetworkX, and Cython on your system.  You will
+probably need to change the 'numpy_include_dirs' variable in setup.py
+to point to the numpy headers for Cython on your system.  Then in the
+rnaseq directory, run
+
+$ python setup.py build_ext
+$ python setup.py build
+$ sudo python setup.py install
+
+Known issues
+------------
+
+None.
+
+Acknowledgements
+----------------
+
+The development of bein was supported by The Bioinformatics and
+Biostatistics Core Facility of the EPFL (http://bbcf.epfl.ch/) and
+SyBit (http://www.systemsx.ch/projects/systemsxch-projects/sybit/).
+
+Thanks to Jacques Rougemont and Jose Ignacio Molina Clemente for
+useful discussions and ideas.
+
 Files
 -----
 
+bin/  -- scripts the user runs
+  simple_inference.py -- run a one way linear model on two sets of SAM/BAM files
 
-bin/
-  analyze_rnaseq.py
-  samfiles_to_sqlite.py
-  find_subproblems.py
-  inference.py
+rnaseq/  -- package containing all the working guts of rnaseq.
+  __init__.py    -- Construct the public interface of the rnaseq package
+  model.pyx      -- Cython source for doing the inference
+  subproblems.py -- Find subsets of the transcripts which may be run separately
+  bag.py         -- Implementation of a bag data structure for use in multiread mapping
+  load.py        -- Functions to assemble SAM/BAM files into a database
 
-rnaseq/
-  model.pyx
-  subproblems.py
-  bag.py
-
-test/
