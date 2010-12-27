@@ -1,4 +1,4 @@
-import networkx
+import networkx as nx
 import sqlite3
 
 def find_subproblems(db):

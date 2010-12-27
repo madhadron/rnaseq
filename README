@@ -3,8 +3,10 @@ Files
 
 
 bin/
+  analyze_rnaseq.py
   samfiles_to_sqlite.py
-  
+  find_subproblems.py
+  inference.py
 
 rnaseq/
   model.pyx
