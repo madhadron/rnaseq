@@ -3,13 +3,13 @@ from distutils.extension import Extension
 from Cython.Distutils import build_ext
 setup(name='rnaseq',
       version='0.1',
-      description='RNASeq analysis pipeline',
+      description='RNASeq analysis tool',
       author='Fred Ross',
       author_email='madhadron@gmail.com',
       cmdclass={'build_ext': build_ext},
-      py_modules=['bag.py'],
-      ext_modules=[Extension("rnaseq",["rnaseq.pyx"])],
-      scripts=['samfiles_to_sqlite.py', 'find_subproblems.py', 
-               'inference.py', 'analyze_rnaseq.py'],
+      package=['rnaseq'],
+      ext_modules=[Extension("rnaseq.model",["rnaseq/model.pyx"])],
+      scripts=['bin/samfiles_to_sqlite.py', 'bin/find_subproblems.py', 
+               'bin/inference.py', 'bin/analyze_rnaseq.py'],
       classifiers=['Topic :: Scientific/Engineering :: Bio-Informatics']
       )

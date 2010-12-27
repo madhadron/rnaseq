@@ -3,3 +3,4 @@ build
 *.c
 *.so
 *.pyc
+.nfs*

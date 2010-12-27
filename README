@@ -1,0 +1,14 @@
+Files
+-----
+
+
+bin/
+  samfiles_to_sqlite.py
+  
+
+rnaseq/
+  model.pyx
+  subproblems.py
+  bag.py
+
+test/
