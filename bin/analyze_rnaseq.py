@@ -51,10 +51,6 @@ class Usage(Exception):
     def __init__(self,  msg):
         self.msg = msg
 
-class ConfigurationError(Exception):
-    def __init__(self, msg):
-        self.msg = msg
-
 class State(object):
     def __init__(self):
         self.verbose = False
