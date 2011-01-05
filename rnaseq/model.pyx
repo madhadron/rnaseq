@@ -101,6 +101,7 @@ def multiplicity_correction(int T, int L, int transcript, dict rs, multiplicitie
     thisr = rs[transcript]
     pm = (thisr*T/L) * np.ones(L)
     for (position,targets),multiplicity in multiplicities.itercounts():
+        print "Length %d, position %d, targets %s" % (L, position, str(targets))
         z = sum(rs[k] for k in targets)
         pm[position] += multiplicity * z / (z + thisr)
     return pm

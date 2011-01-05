@@ -121,7 +121,7 @@ def insert_or_check_transcripts(db, sample, transcripts):
                           values (?,?,?)""", (i,h['SN'],h['LN']-38))
 
     for i,h in enumerate(transcripts):
-        for p in range(h['LN']-38):
+        for p in range(h['LN']-38+1): # Have to add 1 to get final leftsite
             db.execute("""insert into leftsites(sample,transcript,position,n) 
                           values (?,?,?,0)""", (sample,i,p))
 

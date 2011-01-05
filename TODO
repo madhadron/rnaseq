@@ -1,0 +1,7 @@
+* DONE Move functions into package
+* DONE Move functions for samfiles_to_sqlite.py into rnaseq package
+* DONE Make standalone RNASeq script
+* DONE Document functions in package
+* TODO Write README for RNASeq package
+* TODO Add GPL notice to top of all source files
+* TODO Add LICENSE file
