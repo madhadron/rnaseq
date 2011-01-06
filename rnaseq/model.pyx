@@ -1,3 +1,4 @@
+
 import numpy as np
 cimport numpy as np
 from pymc import *
@@ -101,7 +102,6 @@ def multiplicity_correction(int T, int L, int transcript, dict rs, multiplicitie
     thisr = rs[transcript]
     pm = (thisr*T/L) * np.ones(L)
     for (position,targets),multiplicity in multiplicities.itercounts():
-        print "Length %d, position %d, targets %s" % (L, position, str(targets))
         z = sum(rs[k] for k in targets)
         pm[position] += multiplicity * z / (z + thisr)
     return pm
@@ -152,7 +152,9 @@ def build_model(db, group1, group2, transcripts):
         # in defining the model.  We assign tr the value of t, so it
         # will be properly lexically scoped, and use that instead.
         tr = t
-        minusmu[t] = Gamma('minusmu'+str(t), alpha=11, beta=43.5/np.sqrt(n_transcripts))
+        minusmu[t] = Gamma('minusmu'+str(t), 
+                           alpha=5230.0/np.sqrt(n_transcripts),
+                           beta=1/(2.1e-3 * np.sqrt(n_transcripts)))
         a[t] = Cauchy('a'+str(t), 0, 29)
         a[t].value = 0
         maintain_beta[t] = Potential(logp = maintain_positive_parameters,
