@@ -1,6 +1,9 @@
 build
+.DS_Store
+*.pyc
 *~
 *.c
 *.so
-*.pyc
-.nfs*
+MANIFEST
+dist
+_build
