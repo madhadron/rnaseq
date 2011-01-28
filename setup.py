@@ -2,7 +2,7 @@ from distutils.core import setup
 from distutils.extension import Extension
 
 numpy_include_dirs = ['/usr/include/python2.6',
-                      '-I/usr/lib64/python2.6/site-packages/numpy/core/include']
+                      '/usr/lib64/python2.6/site-packages/numpy/core/include']
 
 try:
     from Cython.Distutils import build_ext
@@ -24,6 +24,7 @@ setup(name='rnaseq',
                              extra_link_args = ['-g'])],
       scripts=['bin/samfiles_to_sqlite.py', 'bin/find_subproblems.py', 
                'bin/inference.py', 'bin/analyze_rnaseq.py',
-               'bin/simple_inference.py'],
+               'bin/simple_inference.py', 'bin/inference_subproblem.py',
+               'bin/workflow.py'],
       classifiers=['Topic :: Scientific/Engineering :: Bio-Informatics']
       )
