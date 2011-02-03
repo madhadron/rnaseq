@@ -134,32 +134,36 @@ def main(argv=None):
             ex.add(db_name)
             vmsg("Finished loading SAM files into database.")
 
-        # Find separable subproblems
-        subproblems = find_subproblems(db)
+            # Find separable subproblems
+            subproblems = find_subproblems(db)
 
-        # Make list of pairs of groups
-        # If all groups are control or all are not control, do every
-        # combination of two groups.  Otherwise do every combination
-        # of a control and a non-control group.
-        if all([x['control'] for x in job.groups.itervalues()]) or \
-                not(any([x['control'] for x in job.groups.itervalues()])):
-            # case: all are control or none are control
-            pairs = [(x,y) for x in job.groups.iterkeys()
-                     for y in job.groups.iterkeys()
-                     where x != y]
-            vmsg("Going to run all against all: %s" % str(pairs))
-        else:
-            # case: mixed
-            control_group_ids = [gid for gid,g in job.groups.iteritems()
-                                 if g['control'] == True]
-            other_group_ids = [gid for gid,g in job.groups.iteritems()
-                               if g['control'] == False]
-            pairs = [(x,y) for x in control_group_ids for y in other_group_ids]
-            vmsg("Going to run control against non-control: %s" % str(pairs))
+            # Make list of pairs of groups
+            # If all groups are control or all are not control, do every
+            # combination of two groups.  Otherwise do every combination
+            # of a control and a non-control group.
+            if all([x['control'] for x in job.groups.itervalues()]) or \
+                    not(any([x['control'] for x in job.groups.itervalues()])):
+                # case: all are control or none are control
+                pairs = [(x,y) for x in job.groups.iterkeys()
+                         for y in job.groups.iterkeys()
+                         where x != y]
+                vmsg("Going to run all against all: %s" % str(pairs))
+            else:
+                # case: mixed
+                control_group_ids = [gid for gid,g in job.groups.iteritems()
+                                     if g['control'] == True]
+                other_group_ids = [gid for gid,g in job.groups.iteritems()
+                                   if g['control'] == False]
+                pairs = [(x,y) for x in control_group_ids for y in other_group_ids]
+                vmsg("Going to run control against non-control: %s" % str(pairs))
 
-        # Run parallel executions which run each subproblem in parallel on a pair
-        # leaving a pickle file, then run another script to add all the pickles to
-        # to the database, and write a summary file which it adds to the MiniLIMS.
+            # Submit each subproblem of each pair to LSF to leave a pickle file.
+            jobs = [run_subproblem.lsf(ex, p, sp) for p in pairs for sp in subproblems]
+            pickle_files = [j.wait() for j in jobs]
+
+            # Add pickle files to database
+            for p in pickle_files:
+                write_pickle(db, p)
 
         # Send a report email of the run
 

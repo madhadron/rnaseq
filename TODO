@@ -5,3 +5,7 @@
 * TODO Write README for RNASeq package
 * TODO Add GPL notice to top of all source files
 * TODO Add LICENSE file
+* TODO Write run_subproblem script, bind it with @program
+It should do MCMC sampling on a single subproblem of one pair, reading from a given database, and writing to a pickle file with a given name.
+The pickle should contain a tuple of (pair,{transcript:{'mu':array([posterior]), 'a':array([posterior])}})
+* TODO Write write_pickle to add pickled arrays to the database
