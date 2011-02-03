@@ -167,7 +167,11 @@ def main(argv=None):
             for p in pickle_files:
                 write_pickle(db, p)
 
+            db.close()
+            ex.add(db_name, "Database of posteriors")
+
         # Send a report email of the run
+        # Wait until I switch to the configparser approach
 
         # Call back to the frontend that the job is complete
 
