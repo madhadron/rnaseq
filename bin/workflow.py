@@ -7,6 +7,7 @@ of RNASeq data.
 
 """
 import getopt
+import pickle
 import os
 import sys
 import pysam
@@ -146,7 +147,7 @@ def main(argv=None):
                 # case: all are control or none are control
                 pairs = [(x,y) for x in job.groups.iterkeys()
                          for y in job.groups.iterkeys()
-                         where x != y]
+                         if x != y]
                 vmsg("Going to run all against all: %s" % str(pairs))
             else:
                 # case: mixed
@@ -158,7 +159,8 @@ def main(argv=None):
                 vmsg("Going to run control against non-control: %s" % str(pairs))
 
             # Submit each subproblem of each pair to LSF to leave a pickle file.
-            jobs = [run_subproblem.lsf(ex, p, sp) for p in pairs for sp in subproblems]
+            jobs = [inference.lsf(ex, db_name, p[0], p[1], sp)
+                    for p in pairs for sp in subproblems]
             pickle_files = [j.wait() for j in jobs]
 
             # Add pickle files to database
@@ -174,6 +176,45 @@ def main(argv=None):
         print >>sys.stderr, err.msg
         print >>sys.stderr, usage
         return 2
+
+@program
+def inference(dbname, group1, group2, transcripts):
+    """Runs inference.py on *transcripts* in *group1* and *group2*
+
+    *dbname* is a path to an SQLite3 database, which will be treated
+    as read only.  The results are written in
+    *group1*-*group2*_*transcripts*.pickle, where *transcripts*
+    separates each element of the list with a '-'.
+    """
+    output = "%d-%d_%s.pickle" % (group1,group2,
+                                  "-".join([str(t) for t in transcripts]))
+    return {"arguments": ["inference.py","-v","-o",output,dbname,
+                          str(group1),str(group2)] + \
+                [str(t) for t in transcripts],
+            "return_value": output}
+
+def write_pickle(db, pickle_file):
+    with open(pickle_file) as pf:
+        (g1,g2,posteriors) = pickle.load(pf)
+    db.execute("""insert into inferences(group1,group2)
+                  values (?,?)""",
+               (min(g1,g2), max(g1,g2)))
+    inference_id = db.execute("""select last_insert_rowid()""").fetchone()[0]
+    for t,samples in posteriors.iteritems():
+        for i,v in enumerate(samples['mu']):
+            db.execute("""insert into posterior_samples 
+                          (inference,transcript,variable,sample,value)
+                          values (?,?,?,?,?)""",
+                       (inference_id, t, 'mu', i, v))
+        for i,v in enumerate(samples['a']):
+            db.execute("""insert into posterior_samples 
+                          (inference,transcript,variable,sample,value)
+                          values (?,?,?,?,?)""",
+                       (inference_id, t, 'a', i, v))
+    db.commit()
+        
+
+
 
 if __name__ == '__main__':
     sys.exit(main())

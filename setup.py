@@ -23,8 +23,8 @@ setup(name='rnaseq',
                              extra_compile_args = ['-O3', '-Wall'],
                              extra_link_args = ['-g'])],
       scripts=['bin/samfiles_to_sqlite.py', 'bin/find_subproblems.py', 
-               'bin/inference.py', 'bin/analyze_rnaseq.py',
-               'bin/simple_inference.py', 'bin/inference_subproblem.py',
+               'bin/inference.py', 
+               'bin/simple_inference.py', 
                'bin/workflow.py'],
       classifiers=['Topic :: Scientific/Engineering :: Bio-Informatics']
       )

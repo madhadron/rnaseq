@@ -1,35 +1,27 @@
+#!python
 """
-inference.py
-by Fred Ross <madhadron@gmail.com>
+inference_subproblem.py
+by Fred Ross, <madhadron@gmail.com>
 
-Given a database of leftsites and multiplicities, and a list of
-transcript IDs in that database forming an independent subproblem, do
-one way linear model MCMC on two sample groups, pickle the resulting
-posteriors, and print the names of pickle files.
+Runs a one-way linear model on a given set of transcripts as loaded in a given database.  Writes the result as a pikle of a dictionary of parameters pointing to a dictionary of transcript keys pointing to NumPy arrays of the posteriors for those samples.
 """
 
 import getopt
 import os
 import sys
-import pysam
 import sqlite3
 import pickle
-from pymc import *
-from numpy import *
+from rnaseq import *
 
-import rnaseq
+usage = """inference_subproblem.py [-vh] [-n n_samples] pickle_file db group1 group2 transcripts ...
 
-usage = """inferece.py [-vh] [-n nsamples] [-o picklefile] db group1 group2 1 2 3 ...
-
--v           Run verbosely
--h           Print this message and exit
-nsamples     The number of MCMC samples to simulate
-picklefile   The file to write posteriors to (defaults to db-group1-group2-1,2,3.pickle)
-db           The database to read from
-group1/2     Sample group IDs to use as the two conditions.
-1 2 3 ...    A list of integers giving the transcripts to do inference on.
+-v             Run verbosely
+-h             Print this message and exit
+db             The SQLite3 database to read from.
+-n n_samples   Produce n_samples samples of the posterior.
+group1,group2  Integers giving the group IDs to work on.
+transcripts    Integers giving the transcripts to do inference on.
 """
-
 
 class Usage(Exception):
     def __init__(self,  msg):
@@ -38,9 +30,7 @@ class Usage(Exception):
 class State(object):
     def __init__(self):
         self.verbose = False
-        self.read_length = 38
         self.n_samples = 500
-        self.pickle_filename = None
 
 state = State()
 
@@ -53,7 +43,7 @@ def main(argv=None):
         argv = sys.argv[1:]
     try:
         try:
-            opts, args = getopt.getopt(argv, "hvn:o:", ["help"])
+            opts, args = getopt.getopt(argv, "hvn:", ["help","verbose"])
         except getopt.error, message:
             raise Usage(message)
         for o, a in opts:
@@ -61,7 +51,7 @@ def main(argv=None):
                 print __doc__
                 print usage
                 sys.exit(0)
-            elif o in ("-v", ):
+            elif o in ("-v", "--verbose"):
                 state.verbose=True
                 print "Running verbosely."
             elif o in ("-n", ):
@@ -69,51 +59,68 @@ def main(argv=None):
                     state.n_samples = int(a)
                 except ValueError, v:
                     raise Usage("Number of samples must be an integer, found %s" % a)
-            elif o in ("-o",):
-                state.pickle_filename = a
             else:
                 raise Usage("Unhandled option: " + o)
+        if len(args) < 5:
+            raise Usage("simple_inference.py takes at least five arguments.")
 
-        if len(args) < 4:
-            raise Usage("inference.py takes at least four arguments.")
-        db_filename = args[0]
+        pickle_filename = args[0]
+        if os.path.exists(pickle_filename):
+            raise Usage("Pickle file %s already exists." % pickle_filename)
+
+        db_filename = args[1]
         if not(os.path.exists(db_filename)):
-            raise Usage("File %s does not exist" % db_filename)
-        db = sqlite3.connect(db_filename)
+            raise Usage("No such database %s" % db_filename)
+        else:
+            db = sqlite3.connect(db_filename)
 
         try:
-            group1 = int(args[1])
+            group1 = int(args[2])
         except ValueError, v:
-            raise Usage("ID for group1 must be an integer, got %s" % args[1])
-        
+            raise Usage("group1 must be an integer; found %s" % args[2])
+
         try:
-            group2 = int(args[2])
+            group2 = int(args[3])
         except ValueError, v:
-            raise Usage("ID for group2 must be an integer, got %s" % args[2])
+            raise Usage("group2 must be an integer; found %s" % args[3])
+
         try:
-            transcripts = [int(s) for s in args[3:]]
+            transcripts = [int(x) for x in args[4:]]
         except ValueError, v:
-            raise Usage("Transcript IDs must be integers.")
+            raise Usage("All transcripts must be integers; found %s" %
+                        ', '.join([str(t) for t in args[4:]]))
 
-        if state.pickle_filename == None:
-            state.pickle_filename = \
-                "%s-%d-%d-%s.pickle" % (db_filename, 
-                                        group1, group2, 
-                                        ','.join([str(i) for i in transcripts]))
-        if os.path.exists(state.pickle_filename):
-            raise Usage("Output file %s already exists.  Not overwriting." % state.pickle_filename)
+        # Check that the given transcripts form a complete subproblem
+        if len(transcripts) > 1:
+            query = """select distinct a.transcript
+                       from (select * from multiplicity_entries
+                             where transcript not in %s) as a
+                       join (select * from multiplicity_entries 
+                             where transcript in %s) as b
+                       on a.multiplicity = b.multiplicity
+                    """ % (str(tuple(transcripts)), str(tuple(transcripts)))
+            missed_transcripts = [x for (x,) in db.execute(query)]
+            if missed_transcripts != []:
+                raise Usage("The given set of transcripts, %s, is incomplete.  The complete subproblem also contains %s" % (', '.join([str(t) for t in transcripts]),
+                                                                                                                            ', '.join([str(t) for t in missed_transcripts])))
+                      
 
-        M = rnaseq.build_model(db, group1, group2, transcripts)
-
+        vmsg("Doing inference on transcripts %s" %
+             ', '.join([str(t) for t in transcripts]))
+        M = build_model(db, group1, group2, transcripts)
+        vmsg("Built model")
         M.sample(state.n_samples*5 + 2000, burn=2000, thin=5)
+        vmsg("Sampled from model")
 
-        with open(state.pickle_filename, 'w') as pf:
-            [minusmu,a] = [{},{}]
-            for i in transcripts:
-                minusmu[i] = M.trace('minusmu'+str(i))[:]
-                a[i] = M.trace('a'+str(i))[:]
-            pickle.dump({'minusmu':minusmu, 'a':a}, pf)
-    
+        posteriors = {}
+        for i in transcripts:
+            posteriors[i] = {'mu': -1*M.trace('minusmu'+str(i))[:],
+                             'a': M.trace('a'+str(i))[:]}
+        with open(pickle_filename, 'w') as pf:
+            pickle.dump((group1,group2,posteriors), pf)
+
+        vmsg("Wrote pickle file in %s" % pickle_filename)
+
         return 0
     except Usage, err:
         print >>sys.stderr, err.msg
@@ -122,3 +129,4 @@ def main(argv=None):
 
 if __name__ == '__main__':
     sys.exit(main())
+
